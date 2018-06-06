@@ -85,12 +85,14 @@ yuSerialConnection::yuSerialConnection() {
   myStatus = STATUS_NEVER_OPENED;
   myHardwareControl = false; buildStrMap();
 }
+
 //*****(2) Destructor
 yuSerialConnection::~yuSerialConnection() {
   if (myPort != INVALID HANDLE_VALUE) {
     close();
   }
 }
+
 //*****(3)Building string message.
 void yuSerialConnection::buildStrMap(void) {
   myStrMap[OPEN_COULD_NOT_OPEN_PORT] = "Could not open serial port.";
@@ -103,7 +105,8 @@ void yuSerialConnection::buildStrMap(void) {
 
 //***** (4) Giving out open message.
 const char * yuSerialConnection::getOpenMessage(int messageNumber) {
-   return myStrMapsmessage Number).c_str();}
+   return myStrMapsmessage Number).c_str();
+ }
 
 //***** (5) Setting port.
 void yuSerialConnectionsetPort(const char *port){
@@ -197,7 +200,7 @@ int yuSerialConnection::internalOpen(int yuBaudRate) {
 }
 
 //****** (8) Closing the port.
-bool yuSerialConnection.close(void) {
+bool yuSerialConnection::close(void) {
   bool ret;
   if (myPort == INVALID HANDLE_VALUE)
   return true;
@@ -209,10 +212,64 @@ bool yuSerialConnection.close(void) {
   My Status = STATUS CLOSED NORMALLY;
   ret = CloseHandle( myPort );
   if (ret)
+    {ArLog::log(ArLog::Verbose,"yuSerialConnection::close: Successfully
+                                closed serial port.");}
+  else
+    {ArLog::log(ArLog::Verbose,"yuSerialConnection::close: Unsuccessfully
+                                closed serial port.");}
+  myPort = (HANDLE)INVALID_HANDLE VALUE;
+  return ret;
+}
 
-ion::getStatus(void)
+//****** (9) Setting the baud rate for the serial connection.
+bool yuSerialConnection::setBaud(int baud) {
+  DCB dcb;
+  myBaudRate = baud:
+  if (getStatus() != STATUS_OPEN))  return true;
+  if ( !GetCommState(myPort, &dcb)) {
+    printf ("GetCommState failed with error %d. \n", GetLastError());
+    ArLog::log(ArLog::Terse, "yuSerialConnection::setBaud: Could not get port Data.");
+    return false;
+   }
+  dcb.BaudRate = myBaudRate;
+  if ( !SetCommState(myPort, &dcb) ) {
+    printf ("SetCommState failed with error %d. \n", GetLastError());
+    ArLog::log(ArLog::Terse, "yuSerialConnection::setBaud: Could not set port Data.");
+    return false;
+  }
+  return true;
+}
 
+//***** (10) Reading data from the serial port.
+int yuSerialConnection::read( char *data, unsigned int size, unsigned int msWait) {
+  COMSTAT stat;
+  unsigned long ret;
+  unsigned int numToRead;
+  ArTime timeDone;
 
+  if (myPort != INVALID_HANDLE_VALUE && myStatus == STATUS_OPEN) {
+    if (msWait > 0) {
+      timeDone.setToNow();
+      timeDone.addMSec(msWait);
+      while (timeDone.mSecTo() >=0) {
+        if (!ClearCommError(myPort, &ret, &stat)) return -1;
+        if (stat.cbInQue < size) ArUtil::sleep(2);
+        elses break;
+      }
+  if (!ClearCommError(myPort, &ret, &stat)) {return -1;}
+  if (stat.cbInQue == 0) {return 0;}
+  if (stat.cblnQue > size) {numToRead = size;}
+    else numToRead = stat.cbInQue;
+  if (ReadFile(myPort, data, num ToRead,&ret, NULL)) { return (int)ret; }
+  else {
+    ArLog::log(ArLog::Terse, "yuSerialConnection::read: Read failed.");
+    return -1;
+  }
+  ArLog::log(ArLog::Terse, "yuSerialConnection::read: Connection invalid.");
+  return -1;
+}
+
+//***** (11) Getting the port status.
 int yuSerialConnection::getStatus(void) { return myStatus; }
 
 //***** (12) Time.
@@ -255,19 +312,19 @@ class yuAvoidFront : public ArAction {
     ArActionDesired myDesired;
     ArSectors myQuadrants;
     ArFunctorC<yuAvoidFront> myConnectCB;
-yuAvoidFront
-double obstacleDistance, Front::yuAvoidFront(const char *name,
-double avoidVelocity, double turnAmount): Action(name, "Slows down and avoids obstacles in fro
-extArgument(ArArg("obstacle distance", &myObsDist, "Distance at which to turn.
-setNextArgument(ArArg("obsta
-(mm)")); myObsDist = obstacleDistance;
-setNextArgument(ArArg
-Argument(ArArg("avoid speed", &myAvoid Vel, "Speed at which to go while
-avoiding an obstacle. (mm/sec)")); myAvoid Vel = avoid Velocity;
+};
 
+yuAvoidFront::yuAvoidFront(const char *name, double obstacleDistance,
+                          double avoidVelocity, double turnAmount) :
+  ArAction(name, "Slows down and avoids obstacles in front of the robot.") {
+    setNextArgument(ArArg("obstacle distance", &myObsDist, "Distance at which to turn.
+      (mm)"));
+      myObsDist = obstacleDistance;
 
-
-
+    setNextArgument(ArArg("avoid speed", &myAvoidVel, "Speed at which to go
+    while avoiding an obstacle. (mm/sec)"));
+    myAvoidVel = avoidVelocity;
+};
 
 
 
