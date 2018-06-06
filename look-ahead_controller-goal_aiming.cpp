@@ -20,8 +20,8 @@
 
 using namespace std;
 #define RAD (180/3.1415926535897)
-fstream wayLa("yuWayPointx.txt", ios.in);       /* Geting X Waypoints of the desired route */
-fstream WayLo("yuWayPointY.txt", ios.sin);      /* Geting Y_Waypoints of the desired route */
+fstream wayLa("yuWayPointX.txt", ios::in);       /* Geting X_Waypoints of the desired route */
+fstream WayLo("yuWayPointY.txt", ios::in);      /* Geting Y_Waypoints of the desired route */
 FILE *rx, *ry, *rt;
 
 
@@ -66,7 +66,7 @@ class ArLookAhead Control {
     double wayPtX[1000], wayPtY[1000];
     double xx, yy;
     double L, Lx, Ly, alpha, 1;       /* distace between COM and next waypoint */
-    int ii, no, i;
+    int    ii, no, i;
     double dist, distX, distY , div;  /* distace between two way points */
     double myProcess Time[100];
 
@@ -75,8 +75,11 @@ class ArLookAhead Control {
 };
 
 //*** The constructor, note how it uses chaining to initialize the myTaskCB ***//
+/* constructor is a special type of subroutine called to create an object. It
+prepares the new object for use, often accepting arguments that the constructor
+uses to set required member variables.  */
 ArLookAheadControl::ArLookAheadControl(ArRobot *robot, double vel, const double gain, double lookahead_distance) :
-  myTaskCB(this, &ArLookAheadControl::do Task) {
+  myTaskCB(this, &ArLookAheadControl::doTask) {
     myRobot = robot;
 
     myStartTime.setToNow();

@@ -151,7 +151,120 @@ int yuSerialConnection::internalOpen(int yuBaudRate) {
 
   COMMTIMEOUTS commTimeouts;
   commTimeouts.ReadIntervalTimeout=MAXDWORD;
-  commTimeouts.ReadTotalTimeoutMultiplier = 0;   /* No delay in reading /
+  commTimeouts.ReadTotalTimeoutMultiplier = 0;   /* No delay in reading */
+  commTimeouts.ResdTotalTimeoutConstant = 100;
+  commTimeouts.WriteTotalTimeoutMultiplier = (20000 / dcb.BaudRate) ? (20000 /
+    dcb.BaudRate) : 1;
+  commTimeouts.WriteTotalTimeoutConstant = 0;    /* No delay in writing */
+
+  if(!SetCommTimeouts(myPort, &commTimeouts)) {
+  printf("Error in InternalOpen::SetCommTimeout with error %d.\n". GetLastError());
+
+  Secure ZeroMemory(&dcb, sizeof(dcb));
+  dcb.DCBlength = sizeof(dcb);
+  dcb.ByteSize = 8;
+  dcb.Parity = NOPARITY;
+  dcb.StopBits = ONESTOPBIT:
+  dcb.fOutxCtsFlow = FALSE;
+  dcb.fOutxDsrFlow = 0;
+  dcb.fBinary = TRUE;
+  dcb.fParity = FALSE;
+  dcb.fNull   = FALSE;
+  dcb.fOutX   = FALSE;
+  dcb.finx    = FALSE;
+  dcb.fRtsControl = RTS_CONTROL_ENABLE;
+  dcb.fDtrControl = DTR_CONTROL_ENABLE;
+
+  if ( !SetCommState(myPort, &dcb)) {
+    printf ("SetCommState failed with error %d.\n", GetLastError());
+    ArLog::log(ArLog::Terse, "yuSerialConnection::open: Could not set up port");
+    close();
+    myStatus = STATUS_OPEN_FAILED;
+    return OPEN_COULD_NOT_SET_UP_PORT;
+  }
+
+  myStatus = STATUS OPEN;
+  if (!setBaud(yuBaudRate)) {
+    ArLog::log(ArLog::Terse, "yuSerialConnection::open: Could not set baud rate.");
+    close();
+    myStatus = STATUS OPEN FAILED;
+    return OPEN COULD NOT_SET_BAUD;
+  }
+
+  ArLog::log(ArLog::Verbose, "yuSerialConnection::open: Successfully opened
+  and configured serial port.");
+  return 0;
+}
+
+//****** (8) Closing the port.
+bool yuSerialConnection.close(void) {
+  bool ret;
+  if (myPort == INVALID HANDLE_VALUE)
+  return true;
+  SetCommMask(myPort, 0);                 /* disable event notification */
+  EscapeCommFunction( myPort, CLRDTR );   /* drop DTR */
+  /* purge any outstage any outstanding reads/writes and close device handle */
+  PurgeComm( myPort, PURGE_TXABORT | PURGE_RXABORT | PURGE_TXCLEAR | PURGE_RXCLEAR );
+
+  My Status = STATUS CLOSED NORMALLY;
+  ret = CloseHandle( myPort );
+  if (ret)
+
+ion::getStatus(void)
+
+
+int yuSerialConnection::getStatus(void) { return myStatus; }
+
+//***** (12) Time.
+bool yuSerialConnection::isTimeStamping(void) { return false; }
+
+//***** (13) Time.
+ArTime yuSerialConSerialConnection::getTimeRead(int index) {
+  ArTime now;
+  now.setToNow();
+  return now;
+}
+//************************ End of yuSerialConnect *************************
+
+//*********** Converting degreeMinutes to decimalDegrees ******************
+double degminToDecdeg(double degmin) {
+  double degrees;
+  double minutes = modf(degmin / (double)100.0, &degrees) * (double) 100.0;
+  return degrees + (minutes / (double) 60.0);
+}
+//**************************** End of yuGPS *******************************
+//*************************************************************************
+
+//*************************************************************************
+//************************* Obstacle avoidance ****************************
+//*************************************************************************
+class yuAvoidFront : public ArAction {
+  public:
+    yuAvoidFront(const char *name = "avoid front obstacles", double obstacle Distance = 450,
+          double avoidVelocity = 200, double turnAmount = 15);
+    virtual ~yuAvoidFront(){}
+    virtual ArActionDesired *fire(ArActionDesired currentDesired);
+    virtual ArActionDesired *getDesired(void) { return &myDesired; }
+
+  protected:
+    double myTurnAmount;
+    double myObsDist;
+    double myAvoidVel;
+    double myTurnAmountParam;
+    int myTurning;        /* 1 for turning left, 0 for not turning, -1 for turning right*/
+    ArActionDesired myDesired;
+    ArSectors myQuadrants;
+    ArFunctorC<yuAvoidFront> myConnectCB;
+yuAvoidFront
+double obstacleDistance, Front::yuAvoidFront(const char *name,
+double avoidVelocity, double turnAmount): Action(name, "Slows down and avoids obstacles in fro
+extArgument(ArArg("obstacle distance", &myObsDist, "Distance at which to turn.
+setNextArgument(ArArg("obsta
+(mm)")); myObsDist = obstacleDistance;
+setNextArgument(ArArg
+Argument(ArArg("avoid speed", &myAvoid Vel, "Speed at which to go while
+avoiding an obstacle. (mm/sec)")); myAvoid Vel = avoid Velocity;
+
 
 
 
