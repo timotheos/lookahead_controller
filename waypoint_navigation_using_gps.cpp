@@ -324,7 +324,470 @@ yuAvoidFront::yuAvoidFront(const char *name, double obstacleDistance,
     setNextArgument(ArArg("avoid speed", &myAvoidVel, "Speed at which to go
     while avoiding an obstacle. (mm/sec)"));
     myAvoidVel = avoidVelocity;
+
+    setNextArgument(ArArg("turn amount", &myTurnAmountParam, "Degrees to turn
+        relative to current heading while avoiding obstacle (deg)"));
+    myTurnAmountParam = turnAmount;
+    myTurning = 0;
+};                                  /* No turning */
+
+ArActionDesired *yuAvoidFront::fire(ArActionDesired currentDesired) {
+  double dist, angle;
+  if (currentDesired.getDeltaHeadingStrength() >= 1.0) {myTurning = 0;}
+
+  myDesired.reset();
+  dist = (myRobot->checkRangeDevicesCurrentPolar(-70, 70, &angle) - myRobot-
+  >getRobotRadius());
+
+  if (dist > myObsDist) {
+    flagAvoid = 0;                                    /* no avoiding */
+    if (myTurning != 0) {
+      myDesired.setDeltaHeading(0);
+      myTurning = 0;
+      return &myDesired;
+    }
+    else {
+      myTurning = 0;
+      return NULL;
+    }
+  }
+
+  flagAvoid = 1;                                      /* Avoiding */
+
+  if (myTurning == 0) {
+    if (angle <0) { myTurning = 1; }
+    else { myTurning = -1; }
+    myTurnAmount = myTurnAmountParam;
+    myQuadrants.clear();                              /* start revolution */
+  }
+
+  myQuadrants.update(myRobot->getTh());
+  if (myTurning && myQuadrants.didAll()) {
+    myQuadrants.clear();
+    myTurnAmount /= 2;
+    if (myTurnAmount == 0) myTurnAmount = myTurnAmountParam;
+  }
+
+  myDesired.setDeltaHeading(my Turning * myTurnAmount);
+
+  if (dist > myObsDist/2) {
+    myDesired.setVel(myAvoidVel * dist / myObsDist);
+  }
+  else { myDesired.setVel(0); }
+  return &myDesired;
+}
+//*************************** End of YuAvoid *******************************
+
+//**************************************************************************
+//** Look-ahead Controller in two modes: goal-aiming and obstacle-avoiding **
+//**************************************************************************
+
+fstream wayLa("yuWayPointX.txt",ios::in);
+fstream WayLo("yuWayPointY.txt",ios::in);
+yuAvoidFront yuAvoid("yuAvoid",300,100,15);
+
+FILE *rx, *ry, *rt, *rrx, *rry, *rrt:
+
+class ArLookAheadControl {
+  public:
+    ArLookAheadControl (ArRobot *robot, double vel, const double gain, double
+      lookahead_distance, double *crtgpsx, double * crtgpsy, double *crtgpsthi,
+      double *tXX, double *tYY, double *bH, int *a);
+    ~ArLookAheadControl(void) {}
+    void doTask(void);
+
+  protected:
+    ArRobot *myRobot;
+    ArActionInput yuAction;
+    ArTime myStartTime;
+    ArFunctorC<ArLookAheadControl> myTaskCB:
+
+    double y_hat_x, y hat y;
+    double y_hat_x_dot, y_hat_y dot;
+    double Kp, KpOfdudk;
+    double u_eq1, u_eq2;                      /* new input */
+    double phi[3][3];
+    double det;
+    double inv_phi[3][3];
+    double eta_input1, eta_input2;            /* input for mobile robot */
+    double robox, roboy;
+    double init_ref_x, init_ref_y;
+    double robophi;
+    double x_r, y_r;
+    double vel, Rvel;
+    double y_eq1, y_eq2;
+
+
+    double omega, radius;
+    double wayPtX[1000], wayPtY[1000];
+    double xx, yy;
+    double L, Lx, Ly, alpha, l, alphaLc;      //< dist bet COM and next waypoint
+    int ii, no, i;
+    double dist, distX, distY, div;           //< dist bet two way points
+    double myProcess Time[100];
+    double delta, wx, wy;
+    double rbx, rby, rbt, obsDist, beta;
+    double *CrtGpsXX, *CrtGpsYY, *crtgpsThi;
+    double crtX, crtY, crtAng;
+    FILE *dd;
+    double *TXX, *TYY, txx, tyy;
+    double *BH, baseh, TrGps X, TrGpsY;
 };
+
+//*** the constuctor, note how it uses chaining to initialize the myTaskCB
+ArLookAheadControl::ArLookAheadControl(ArRobot *robot, double vel,
+  const double gain, double lookahead_distance, double *crtgpsx, double
+  *crtgpsy, double *crtgpsthi, double *tXX, double *tYY, double *bH, int *a):
+
+myTaskCB(this, &ArLookAheadControl::doTask) {
+  myRobot = robot;
+  myStartTime.setToNow();
+  myRobot->addUserTask("ArLookAheadControl", 50, &myTaskCB);
+
+  Kp = gain;
+  init_ref_x = lookahead_distance:
+  init_ref_y = 0.0;                             // mm
+
+  rx = fopen("AvoidMyuRobotX.txt", "w+");       //robot's coordinates and heading angle
+  ry = fopen("AvoidMyuRobotY.txt", "w+");       //while it is in goal-aiming mode
+  rt = fopen("AvoidMLyuRobotThi.txt", "w+");
+  rrx = fopen("GoalAimMyuRobotX.txt", "w+");
+  rry = fopen("GoalAimMyuRobotY.txt", "w+");    // robot's coordinates and heading angle
+  rrt = fopen("GoalAimMyuRobotY.txt", "w+");    // while it is in obstacle-avoiding mode
+
+  Lx      = 0.0; Ly      = 0.0; L     = 0.0; alpha   = 0.0;   l = 0.0;
+  ii      = 0;   no      = 0;   delta = 0.0; alphaLc = 0.0;
+  y_hat_x = 400; y_hat_y = 0;   div   = vel;
+
+  for(i=0; i<100; i++) { myProcess Time[i] = 0.0; }
+
+  if(!wayLa || !wayLo) {
+    printf(" Exit due to not having way point files \n");
+    exit(2);
+  }
+  else {
+    while(! wayLa.eof() || !wayLo.eof()) {
+      wayLa>>xx;      wayPtX[ii] = xx;
+      wayLo>>yy;      wayPtY[ii] = yy;
+      ii++;
+    }
+  }
+
+  printf(" Number of way points : %d\n\n", ii);
+  dist = sqrt((wayPtX[0] * wayPtX[0]) + (wayPtY[0] * wayPtY[0]));
+  myProcess Time[0] = dist/div;
+
+  wx   = 0.0; wy   = 0.0; obsDist = 0.0; beta = 0.0;
+  rbx  = 0.0; rby  = 0.0; rbt     = 0.0;
+  crtX = 0.0; crtY = 0.0; crtAng  = 0.0;
+  modWPX = 0.0; modWPY = 0.0;
+  CrtGpsXX = crtgpsx; CrtGpsYY = crtgpsy; crtgpsThi=crtgpsthi;
+  BH = bH;            TXX = tXX;           TYY = tYY;
+  dd = fopen("yuCheckData.txt","w+");
+
+//**** Main task of look-ahead controller
+ArLookAheadControl::doTask(void) {
+
+     (*myRobot).addAction(&yuAvoid, 99);
+     (*myRobot).addAction(&yuAction, 50);
+     time_t msec;
+AA:  msec = myStartTime.mSecSince();
+     double myTime = double(msec/1000) + double(msec%1000)/1000;
+
+  if ((myTime < myProcessTime[no]) && no <ii) {
+    baseH = *BH;
+    robox = *TXX;                       //mm
+    roboy = *TYY;
+    robophi = (*crtgps Thi) - baseH;
+  }
+
+  rbx = robox;    rby = roboy;    rbt = robophi;
+  // Distance between look-ahead point and COM of robot
+  x r= init_ref_x;          y_r= init_ref_y;
+
+  // Dist & angle between COM & current waypoint
+  Lx      = wayPtX[no] - robox;
+  Ly      = wayPtY[no] - roboy;
+  L       = sqrt( (Lx * Lx) + (Ly * Ly) );
+  alpha   = atan2(Ly,Lx) - robophi;   // rad
+  alphaLc = atan2(Ly,Lx);             // rad
+
+  // Angle & dist between look-ahead & current waypoint
+  l = sqrt( (x_r*x_r) + (L*L) - (2 * x_r * L * cos(alpha)) );
+
+  //*** Check Obstacle dist & change Lc -> Rb
+  myRobot->lock();
+  obsDist = myRobot->checkRangeDevicesCurrentPolar(-90, 90, &beta);
+  myRobot->unlock();
+
+  //**********************************
+  //***** Obstacle-avoiding Mode *****
+  //**********************************
+
+  if((flagAvoid == 1) || (obsDist < 1500 )) {
+    if(L < 1000) { delta= 170; }
+    else         { delta = 80; }
+
+    if(flagAvoid ==1) {
+      myProcessTime[no] = myProcessTime[no] + 0.22;
+      delta = 150;
+    }
+    printf("Obstacle-avoiding Mode \t Flag %d \n", flagAvoid);
+
+    y_hat_x_dot = 300 * cos(alpha);
+    y_hat_y dot = 300 * sin(alpha);
+    y_hat_x     = 400; y_hat_y   = 0;             /* lookahead_distance */
+
+    //Coordinates of reference point
+    y_hat_x = y_hat_x + y_hat_x_dot * 0.1;        /* mm */
+    y_hat_y = y_hat_y + y_hat_y_dot * 0.1;
+
+    // Output equation for Obstacle-avoiding mode
+    y_eq1 = x_r + delta * cos(alpha);
+    y_eq2 = delta * sin(alpha);
+
+    // Decoupling matrix inverse for Obstacle-avoiding mode
+    inv_phi[1][1] = 1.00;
+    inv_phi[1][2] = 0;
+    inv_phi[2][1] = 0;
+    inv_phi[2][2] = (1.00/x_r);
+
+    fprintf(rrx, " %0.2f \n", rbx);
+    fprintf(rry, " %0.2f \n", rby);
+    fprintf(rrt, " %0.2f \n". ArMath::radToDeg(rbt));    /* rad */
+
+    //New input
+    u_eq1 = y_hat_x_dot + Kp*(y_hat_x - y_eq1)
+    u_eq2 = y_hat_y_dot + Kp*(y_hat_y - y_eq2);
+
+    //Control input for mobile robot
+    eta_input1 = inv_phi[1][1] * u_eq1 + inv_phi[1][2] * u_eq2;  /* vel of robot */
+    eta_input2 = inv_phi[2][1] * u_eq1 + inv_phi[2][2] * u_eq2;  /* vel of robophi */
+
+    vel = eta_input1;
+    Rvel = ArMath::radToDeg(eta_input2);
+    myRobot->lock();
+    yuAction.setVel(vel);
+    yuAction.setRotVel(Rvel);
+    myRobot->unlock();
+
+  //*** Instance value while changing from Obstacle-avoiding mode to goal-aiming mode
+    y_hat_x = robox + x_r;
+    y_hat_y= roboy + y_r;
+  }
+
+  //****************************
+  //***** Goal-aiming Mode *****
+  //****************************
+
+  else {
+    printf(" Goal-aiming Mode \n");
+    y_hat_x_dot = 250 * cos(alphaLc);
+    y_hat_y_dot = 250 * sin(alphaLc);
+
+    //Coordinates of reference point
+    if ( L < 1000) {
+      y_hat_x = robox + (0.75) * (x_r * cos(alphaLc) - y_r * sin(alphaLc));
+      y_hat_y = roboy + (0.75) * (x_r * sin(alphaLc) + y_r * cos(alphaLc));
+      printf(" ** ");
+    }
+    else {
+      y_hat_x = robox + x_r * cos(alphaLc) - y_r * sin(alphaLc);
+      y_hat_y = roboy + x_r * sin(alphaLc) + y_r * cos(alphaLc);
+    }
+    // Output equation for Goal-aiming mode
+    y_eq1 = robox + x_r * cos(robophi) - y_r * sin(robophi);
+    y_eq2 = roboy + x_r * sin(robophi) + y_r * cos(robophi);
+
+    // Decoupling matrix for Goal-aiming mode
+    phi[1][1] = cos(robophi);
+    phi[1][2] = -x_r*sin(robophi) - y_r*cos(robophi);
+    phi[2][1] = sin(robophi);
+    phi[2][2] =  x_r*cos(robophi) - y_r*sin(robophi);
+
+    // Inverse of decoupling matrix Phi
+    det = phi[1][1] * phi[2][2] - phi[2][1] * phi[1][1];
+    inv_pil[1][1] =  phi[2][2]/det;
+    inv_phi[1][2] = -phi[1][2]/det;
+    inv_phi[2][1] = -phi[2][1]/det;
+    inv_phi[2172] =  phi[1][1]/det;
+
+    fprintf(rx, " %0.2f \n", rbx);
+    fprintf(ry, " %0.2f \n", rby);
+    fprintf(rt, " %0.2f \n", ArMath.radToDeg(rbt));
+
+    //New input to the mobile robot
+    u_eq1 = y_hat_x_dot + Kp*(y_hat_x - y_eq1);
+    u_eq2 = y_hat_y_dot + Kp*(y_hat_y - y_eq2);
+
+    //Control input for mobile robot
+    eta_input1 = inv_phi[1][1] * u_eq1 + inv_phi[1][2] * u_eq2; /*vel of robot*/
+    eta input2 = inv_phi[2][1] * u_eq1 + inv_phi[2][2] * u_eq2; /*vel of robophi*/
+
+    vel = eta_inputl;
+    Rvel = ArMath::radToDeg(eta_input2):
+    myRobot->lock();
+    yuAction.setVel(vel);
+    yuAction.setRotVel(Rvel);
+    myRobot->unlock();
+  }
+  // ********************************************
+  // ***** Checking next waypoint to attain *****
+  // ********************************************
+
+  wx = wayPtX[no];        wy = wayPtY[no);
+  if((WX-320 < robox) && (robox < wx+320) && (wy-320 < roboy) && (roboy < wy+320)) {
+    printf("\t***");
+    no++;
+    distX = wayPtX[no] - wayPtX[no-1];
+    distY = wayPtY[no] - wayPtY[no-1];
+    dist = sqrt((distX * distX) + (dist Y * distY));
+    myProcessTime[no] = myProcessTime[no-1] + (dist/div);
+
+    //*** Get current position through GPS
+    crtX = *CrtGps XX;                              /* mm */
+    crtY = *CrtGps YY;
+    crtAng = ArMath::degToRad(*crtgps Thi);         /* rad */
+
+    txx = *TXX;                                     /* ECEF Gps XY */
+    tyy = *TYY;
+    goto AA;
+  } // End of if (my Time < myProcess Time)
+
+  else {
+    printf("Ok");
+    myRobot->lock();
+    yuAction.setVel(0);
+    yuAction.setRotVel(0);
+    myRobot->unlock();
+  }
+}
+
+//********* End of Look-ahead of Look-ahead Controller in two modes **********
+//****************************************************************************
+
+//****************************************************************************
+//***************************** Function Main ********************************
+
+int main(int argc, char **argv) {
+  //*** Printing out the program start time.
+  time_t runtime;
+  FILE *tim;
+  tim = fopen("yuRunTime.txt","w+").
+
+  if( time(&runtime) ==-1) {
+    printf("Calendar time not available. \n");
+    exit(1);
+  }
+  else fprintf(tim, "The start time is \t\t %s \n", ctime(&runtime);
+
+  //** Robot and Sick connection.
+  ArRobot robot;                    //< the robot
+  ArSick sick;                      //< the laser
+  ArSerialConnection robotConn;     //< the robot serial connection
+  ArSerialConnection sickConn;      //< SICK serial connection
+  ArTcpConnection    tcpConn;       //< Simulation tcp connection
+  bool useSim;
+  Aria::init();
+
+  //** All the information for our printing out Robot and Sick data.
+  double x,y;
+  std::list<ArPoseWithTime *> *readings;
+  std::list<ArPoseWithTime *>::iterator it;
+
+  FILE *sickX,*sickY;
+  sickX = fopen("yuSickX.txt", "w+");
+  sickY = fopen("yuSickY.txt", "w+");
+
+  //** Add the laser to the robot
+  robot.addRangeDevice(&sick);
+
+  //** See if we can get to the simulator (true is success)
+  tcpConn.setPort();
+  if(tcpConn.openSimple()) {
+    printf("Connecting to simulator through TCP \n");
+    robot.setDeviceConnection(&tcpConn);
+    useSim = true;
+  }
+  else {
+    useSim = false;
+    // We could not get to the simulation, so set the port for
+    // the serial connection and then set the serial connection as robot device.
+    robotConn.setPort();      /< Default port for robot is COM1
+    printf(" Could not connect to the simulator. Connecting to robot through serial. \n");
+    robot.setDeviceConnection(&robotConn);
+
+    //** Try to connect. if we fail exit
+    if(!robot.blockingConnect()) {
+      printf("Could not connect to robot... exiting\n");
+      Aria::shutdown();
+      return 1;
+    }
+
+    //** Start the robot running. True so that if we lose connection, the run stops.
+    robot.runAsync(true);
+    ArActionJoydrive joydrive;
+    joydrive.setStoplfNoButtonPressed(false);
+    joydrive.setThrottleParams(100, 400);
+
+    //** Configure and setup the SICK
+    sick.configureShort(useSim, ArSick::BAUD38400. ArSick::DEGREES180,
+              ArSick::INCREMENT_ONE);
+    sickConn.setPort(ArUtil::COM3);
+    sick.setDeviceConnection(&sickConn);
+    sick.runAsync();
+
+    //** Check SICK connection
+    if(!sick.blockingConnect()) {
+      printf("Could not connect to SICK laser... exiting\n");
+      Aria::shutdown();
+      return 1;
+    }
+    if(sick.isConnected()) { printf("SICK Connected\n"); }
+    else { printf("SICK: not connected\n"); }
+
+    //** Turn on the motors, turn off amigobot sounds and turn on joydrive.
+    robot.comInt(ArCommands::ENABLE, 1);
+    robot.comInt(ArCommands::SOUNDTOG, 0);
+    robot.comInt(ArCommands::JOYDRIVE, 1);
+    robot.addAction(&joydrive, 100);
+
+    //************************************************************************
+    //*************** Configuring the desired serial port for GPS ************
+    //************************************************************************
+    yuSerialConnection gpsConn;
+    gpsConn.setPort("COM2");        //< for the sake of port no.
+
+    if(gpsConn.setBaud(9600)) { printf(" Finished setting Baud rate!\n"); }
+    else {
+      printf(" Due to not setting the baud rate. ~-~ !! \n");
+      gpsConn.close();
+      exit(1);
+    }
+
+    if(gpsConn.open("COM2", 9600) ==0) {     //< port no. and baud rate.
+      printf(" Congratulations!! You opened the serial port successfully\n");
+    }
+    else { printf("Exiting due to not opening port\n");
+      gpsConn.close();
+    }
+
+    //************************************************
+    //*********** Reading data from the GPS **********
+    //************************************************
+
+    char buf[256];
+    long int size ToRead=256;
+    int mSecWait =50000;
+    unsigned int noOfRead=0;
+    int i=0;
+    string lati ="";
+    string longi="";
+    string bear ="";
+    string sate ="";
+
+
+
 
 
 
