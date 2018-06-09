@@ -1,5 +1,7 @@
 # Pioneer 3 AT ROS Setup
 
-Pioneer 3 AT is a robot developed by Omron Adept MobileRobots, however it was discontinued last year. Hopefully, this will help users to install related software on their laptops.
+Pioneer 3 AT is a robot developed by Omron Adept MobileRobots, however it was discontinued last year. This serves as a quick installation guide to get the robot up and coming.
 
-** Not Enough Minerals to start **
+Aside from a quick start guide, a look-ahead control is implemented on the robot using ArNetworking.
+
+** Not Enough Minerals to Produce Readme **
