@@ -116,6 +116,7 @@ void yuSerialConnectionsetPort(const char *port){
   }
   else { myPortName = port; }
 }
+
 //***** (6) Openning the port with the parameter value of port no. and baud rate.
 int vuSerialConnection::open(const char *port, int yubaud) {
   setPort(port);
@@ -281,6 +282,7 @@ ArTime yuSerialConSerialConnection::getTimeRead(int index) {
   now.setToNow();
   return now;
 }
+
 //************************ End of yuSerialConnect *************************
 
 //*********** Converting degreeMinutes to decimalDegrees ******************
@@ -289,6 +291,7 @@ double degminToDecdeg(double degmin) {
   double minutes = modf(degmin / (double)100.0, &degrees) * (double) 100.0;
   return degrees + (minutes / (double) 60.0);
 }
+
 //**************************** End of yuGPS *******************************
 //*************************************************************************
 
@@ -716,75 +719,359 @@ int main(int argc, char **argv) {
     robotConn.setPort();      /< Default port for robot is COM1
     printf(" Could not connect to the simulator. Connecting to robot through serial. \n");
     robot.setDeviceConnection(&robotConn);
+  }
+  //** Try to connect. if we fail exit
+  if(!robot.blockingConnect()) {
+    printf("Could not connect to robot... exiting\n");
+    Aria::shutdown();
+    return 1;
+  }
 
-    //** Try to connect. if we fail exit
-    if(!robot.blockingConnect()) {
-      printf("Could not connect to robot... exiting\n");
-      Aria::shutdown();
-      return 1;
+  //** Start the robot running. True so that if we lose connection, the run stops.
+  robot.runAsync(true);
+  ArActionJoydrive joydrive;
+  joydrive.setStoplfNoButtonPressed(false);
+  joydrive.setThrottleParams(100, 400);
+
+  //** Configure and setup the SICK
+  sick.configureShort(useSim, ArSick::BAUD38400. ArSick::DEGREES180,
+            ArSick::INCREMENT_ONE);
+  sickConn.setPort(ArUtil::COM3);
+  sick.setDeviceConnection(&sickConn);
+  sick.runAsync();
+
+  //** Check SICK connection
+  if(!sick.blockingConnect()) {
+    printf("Could not connect to SICK laser... exiting\n");
+    Aria::shutdown();
+    return 1;
+  }
+  if(sick.isConnected()) { printf("SICK Connected\n"); }
+  else { printf("SICK: not connected\n"); }
+
+  //** Turn on the motors, turn off amigobot sounds and turn on joydrive.
+  robot.comInt(ArCommands::ENABLE, 1);
+  robot.comInt(ArCommands::SOUNDTOG, 0);
+  robot.comInt(ArCommands::JOYDRIVE, 1);
+  robot.addAction(&joydrive, 100);
+
+  //************************************************************************
+  //*************** Configuring the desired serial port for GPS ************
+  //************************************************************************
+  yuSerialConnection gpsConn;
+  gpsConn.setPort("COM2");        //< for the sake of port no.
+
+  if(gpsConn.setBaud(9600)) { printf(" Finished setting Baud rate!\n"); }
+  else {
+    printf(" Due to not setting the baud rate. ~-~ !! \n");
+    gpsConn.close();
+    exit(1);
+  }
+
+  if(gpsConn.open("COM2", 9600) ==0) {     //< port no. and baud rate.
+    printf(" Congratulations!! You opened the serial port successfully\n");
+  }
+  else { printf("Exiting due to not opening port\n");
+    gpsConn.close();
+  }
+
+  //************************************************
+  //*********** Reading data from the GPS **********
+  //************************************************
+
+  char buf[256];
+  long int size ToRead=256;
+  int mSecWait =50000;
+  unsigned int noOfRead=0;
+  int i=0;
+  string lati ="";
+  string longi="";
+  string bear ="";
+  string sate ="";
+  double latDM =0.0,  latDD =0.0;
+  double lonDM =0.0,  lonDD =0.0;
+  double bearDeg=0.0, sateNo =0.0;
+
+  FILE *thi, *latt, *lonn, *satellite;
+  FILE *lat, *lon, *nns, *eeww, *rmcMsg, *hdtMsg, *readData;
+  readData  = fopen("yuReadDataSerialPort.txt","w+");
+  lat       = fopen("yuGpsLatitude_DegMin.txt","w+");
+  lon       = fopen("yuGpsLongitude_DegMin.txt", "w+");
+  latt      = fopen("yuGpsLatitude_DecDeg.txt","w+");
+  lonn      = fopen("yuGpsLongitude_DecDeg.txt","w+");
+  thi       = fopen("yuGpsHeading.txt","w+");
+  rmcMsg    = fopen("yuGPGGA.txt","w+"):
+  hdtMsg    = fopen("yuGPHDT.txt","w+");
+  nnss      = fopen("yuNorthSouth.txt","w+");
+  eeww      = fopen("yuEastWest.txt","w+");
+  satellite = fopen("yuGpsSatellite No.txt","w+");
+
+  double la[10000], lo[10000], hd[10000];
+  for (int aa= 0; aa < 10000; aa++) {
+    la[aa] = 0.0; lo[aa] = 0.0; hd[aa] = 0.0;
+  }
+
+  FILE *crtGpsx,* crtGpsy, *transGpsx, *transGpsy;
+  crtGpsx   = fopen("yuGps X.txt", "w+");
+  crtGpsy   = fopen("yuGps Y.txt","w+");
+  transGpsx = fopen("yuECEFGpsX.txt","w+");
+  transGpsy = fopen("yuECEFGpsY.txt","w+");
+
+  int    count = 1, index = 1;
+  double baseLa,    baseLo,    baseHd;
+  double crtGpsLa,  crtGpsLo,  crtGpsThi,
+  double crtGpsX,   crtGpsY;
+  double tCrtGpsX,  tCrtGpsY,  thida = 0.0;
+  double tx[10000], ty[10000];
+  int A = 0;
+
+
+  for(int aa = 0; aa < 1000; aa++) {
+    tx[aa] = 0.0; ty[aa] =0.0;
+  }
+
+  // Calling ArLookAheadControl so that mobile robot works in Look-ahead
+  // controller based on two modes (Goal-aiming & Obstacle-avoiding)
+  // while carrying GPS readings to Look-ahead controller
+
+  ArLookAheadControl controller( &robot, 200, 1.0, 400,
+    &crtGpsX, &crtGpsY, &crtGps Thi, &tCrtGpsX, &tCrtGpsY, &baseHd, &A);
+
+  printf("yuGps Reading : Start reading. It may take a few sec... \n");
+
+  while(true) {
+    size_t gpgga = 0,    dollar = 0,  gphat=0;
+    size_t lastGpgga= 0, lastGphdt=0;
+    size_t checkCharGPGGA = 0,        checkCharGPHDT=0;
+    unsigned int pos = 0;
+    string msg = "\0";
+    noOfRead = gpsConn.read(buf, sizeToRead, mSecWait);
+
+
+    msg = buf;
+    for(unsigned int k = 0; k < noOfRead; k++) {
+      fprintf(readData," (%d)\t%c \n", k, msg[k]);
     }
 
-    //** Start the robot running. True so that if we lose connection, the run stops.
-    robot.runAsync(true);
-    ArActionJoydrive joydrive;
-    joydrive.setStoplfNoButtonPressed(false);
-    joydrive.setThrottleParams(100, 400);
+    //*** Checking and extracting lat/lon/heading from all serial data.
+    while(pos < noOfRead) {
+      dollar = msg.find('$', pos);
+      if(dollar=string::npos) {
+        pos = noOfRead; goto AA; }
+      else {
+        gpgga = msg.find("GPGGA\0", dollar+1);
+        gphdt = msg.find("GPHDT\0", dollar+1);
+      }
 
-    //** Configure and setup the SICK
-    sick.configureShort(useSim, ArSick::BAUD38400. ArSick::DEGREES180,
-              ArSick::INCREMENT_ONE);
-    sickConn.setPort(ArUtil::COM3);
-    sick.setDeviceConnection(&sickConn);
-    sick.runAsync();
+      //*** Checking whether $GPGGA messages are existing or not.
+      if(gpgga = string::npos) {
+        pos = noOfRead;
+        printf(" yuGpsReading : Warning... No $GPGGA messages...\n");
+        goto AA;
+      }
+      else {
+        checkCharGPGGA = msg.find('*', gpgga+5);
+      }
+      int diffGPGGA = int(checkCharGPGGA) - int(gpgga); //< Count from the first
+                                                        // G of $GPGGA to *
 
-    //** Check SICK connection
-    if(!sick.blockingConnect()) {
-      printf("Could not connect to SICK laser... exiting\n");
-      Aria::shutdown();
-      return 1;
-    }
-    if(sick.isConnected()) { printf("SICK Connected\n"); }
-    else { printf("SICK: not connected\n"); }
+      //*** Checking whether $GPHDT messages are existing or not.
+      if(gphdt = string::npos) {
+        pos=noOfRead;
+        printf(" yuGpsReading : Warning... No $GPHDT messages...\n");
+        goto AA;
+      }
+      else { checkCharGPHDT = msg.find('*', gphdt+5); }
 
-    //** Turn on the motors, turn off amigobot sounds and turn on joydrive.
-    robot.comInt(ArCommands::ENABLE, 1);
-    robot.comInt(ArCommands::SOUNDTOG, 0);
-    robot.comInt(ArCommands::JOYDRIVE, 1);
-    robot.addAction(&joydrive, 100);
+      int diffGPHDT = int(checkCharGPHDT) - int(gphdt);
 
-    //************************************************************************
-    //*************** Configuring the desired serial port for GPS ************
-    //************************************************************************
-    yuSerialConnection gpsConn;
-    gpsConn.setPort("COM2");        //< for the sake of port no.
+      //***************************
+      //***** $GPGGA Message ******
+      //***************************
 
-    if(gpsConn.setBaud(9600)) { printf(" Finished setting Baud rate!\n"); }
-    else {
-      printf(" Due to not setting the baud rate. ~-~ !! \n");
-      gpsConn.close();
-      exit(1);
-    }
+      if(int(gpgga) > int(lastGpgga)) {
+      //** Printing out $GPGGA messages to text file.
+      for(int k= int(gpgga)-1; k< int(checkCharGPGGA)+3; k++) {
+        fprintf(rmcMsg," <%d> \t %c \n", k, msg[k]);
+      }
+      fprintf(rmcMsg,"\n");
 
-    if(gpsConn.open("COM2", 9600) ==0) {     //< port no. and baud rate.
-      printf(" Congratulations!! You opened the serial port successfully\n");
-    }
-    else { printf("Exiting due to not opening port\n");
-      gpsConn.close();
-    }
+      //** Extracting latitude, longitude and satellite no.
+      if(msg[gpgga+6]!=',' && (diffGPGGA >=66 && diffGPGGA <= 75)) {
+        printf(" yuGpsReading : Extracting Lat/Lon/SatelliteNo from $GPGGA
+          message... \n");
+        lati  = msg.substr( gpgga+16, gpgga+25); //< string of latitude
+        longi = msg.substr( gpgga+29, gpgga+39); //< string of longitude
+        sate  = msg.substr( gpgga+45, gpgga+46); //< string of satellite no. in view
 
-    //************************************************
-    //*********** Reading data from the GPS **********
-    //************************************************
+        latDM = atof(lati.c_str());         //< double value of lat, DegMin
+        lonDM = atof(longi.c_str());
+        sateNo = atof(sate.c_str());
 
-    char buf[256];
-    long int size ToRead=256;
-    int mSecWait =50000;
-    unsigned int noOfRead=0;
-    int i=0;
-    string lati ="";
-    string longi="";
-    string bear ="";
-    string sate ="";
+
+        char ns = msg[gpgga+27];   fprintf(nnss,"%c \n", ns);
+        if(ns=='S') { latDM *= -1; }
+        char ew = msg[gpgga+41);   fprintf(eeww,"%c \n", ew);
+        if(ew=='W') {lonDM *= -1;}
+
+        latDD = degminToDecdeg(latDM);
+        lonDD = degminToDecdeg(lonDM);
+
+        fprintf(lat,"%2.5f\n",latDM);
+        fprintf(latt,"%2.8f\n",latDD);
+        fprintf(lon,"%2.5f\n",lonDM);
+        fprintf(lonn,"%2.8f\n",lonDD);
+        fprintf(satellite, "%.0f \n", sateNo);
+
+        la[index] = latDD;
+        lo[index] = lonDD;
+
+        //** Printing out the runtime
+        if( time(&runtime) == -1) {
+          printf("Calendar time not available. \n");
+          exit(1);
+        }
+        else { fprintf(tim,"*** \t The run time is \t %s ", ctime(&runtime)); }
+      }
+      else {
+        printf(" yuGpsReading : Warning...No data in $GPGGA message...\n");
+        fprintf(lat,"%2.5f\n",latDM);
+        fprintf(latt,"%2.8f\n", latDD);
+        fprintf(lon,"%2.5f\n",lonDM);
+        fprintf(lonn,"%2.8f\n",lonDD);
+        fprintf(satellite, "%.0f \n", sateNo);
+
+        la[index] = latDD;
+        lo[index] = lonDD;
+
+        //** Printing out the runtime
+        if( time(&runtime) == -1) {
+          printf("Calendar time not available. \n");
+          exit(1);
+        }
+        else { fprintf(tim,"* \t The run time is \t%s ", ctime(&runtime)); }
+      }
+
+      //**************************
+      //***** $GPHDT Message *****
+      //**************************
+      if(int(gphdt) > int(lastGphdt)) {
+        //** Printing out $GPHDT messages to text file.
+        for(int n= int(gphdt)-1; n< int(checkCharGPHDT)+3; n++) {
+          fprintf(hdtMsg," <%d> \t %c \n", n, msg[n]);
+        }
+        fprintf(hdtMsg,"\n");
+
+        //** Extracting heading angle.
+        if(msg[gphdt+6]!=',' && diffGPHDT>=13) {
+          printf(" yuGpsReading : Extracting heading angle from $GPHDT
+            message... \n");
+
+          //< string of heading
+            bear = msg.substr( gphdt+6, checkCharGPHDT-2);
+            bearDeg = atof(bear.c_str());
+            fprintf(thi,"%3.2f\n", bearDeg);
+            hd[index++] = bearDeg;
+          }
+        else {
+          printf(" yuGps Reading : Warning... No data in $GPHDT message... \n");
+          fprintf(thi,"%3.4f\n",bearDeg);
+          hd[index++] = bearDeg;
+        }
+      }
+
+      if( gpgga= string::npos || checkCharGPGGA = string::npos ||
+          checkCharGPHDT==string::npos || gphdt == string::npos || dollar== string::pos )
+        { pos= noOfRead; }
+      else if(int(gpgga) > int(gphdt))  { pos = int(checkCharGPGGA) + 5; }
+      else  { pos = int(checkCharGPHDT) + 5; }
+
+AA:   printf("..... \n");
+      lastGpgga= gpgga;   lastGphdt = gphdt;
+    } //<End of while(pos<noOfRead)
+
+    //************** End of GPS data readings ********************
+
+      sick.lockDevice();
+      readings = sick.getCurrentBuffer();
+
+      for (it = readings ->begin(); it != readings->end(); it++) {
+        x = (*it)->getX()-sick.getSensorPositionX();
+        y = (*it)->getY()-sick.getSensorPositionY();
+        fprintf(sickX,"%.0f \n",x);
+        fprintf(sickY,"%.0f \n",y);
+      }
+
+      sick.unlockDevice(); ArUtil::sleep(100);
+
+    //*****************************************************
+    //***** Calculating Absolute x & y from GPS data ******
+    //*****************************************************
+
+
+    //*** Checking and assigning base Lati & Long
+    int cc = 0;
+EE: if(la[cc] != 0 && lo[cc] !=0) {
+      baseLa = la[cc]/RAD_TO_DEG;
+      baseLo = lo[cc]/RAD_TO_DEG;
+      baseHd = hd[cc]; }                              //> Deg
+    else { cc++; goto EE; }
+
+    printf("Just checking: BaseLa %f, BaseLo %f, BaseHead %f \n",
+            baseLa*RAD_TO_DEG, baseLo*RAD_TO_DEG, baseHd);
+
+    crtGpsLa  = (lasindex-2])/RAD_TO_DEG; //< unit in radians
+    crtGpsLo  = (losindex-2])/RAD_TO_DEG; //< unit in radians
+    crtGpsThi = (hd[index-2])/RAD_TO_DEG; //< unit in radians
+
+    if( hd[index-2]> 3.14) { crtGpsThi = (hd[index-2]) - 6.28; }
+    crtGpsThi = crtGps Thi * (-1);
+
+    //*** Transforming Lat\Lon to absolute x and y, unit in millimeters
+    crtGpsY = (crtGpsLa - baseLa)*(NAUTICAL_MILES * METERS_PER_NM) * 1000:
+    crtGpsX = (crtGpsLo - baseLo)*(NAUTICAL_MILES * METERS PER NM) *
+              cos((crtGpsLa + baseLa)/2)* 1000;
+    fprintf(crtGpsx," %f \n ", crtGpsX);
+    fprintf(crtGpsy," %f \n ", crtGpsY);
+
+    //***ECEF
+    thida = (baseHd/RAD_TO_DEG);                  //> rad
+    tCrtGpsX = -(cos(thida) * (crtGpsX) - sin(thida) * crtGpsY);
+    tCrtGpsY =  (sin(thida) * (crtGpsX) + cos(thida) * crtGpsY);
+
+    fprintf( transGpsx, " %f \n", tCrtGpsX);
+    fprintf( transGpsy, " %f \n", tCrtGpsY);
+    //**********
+    printf("--- <%d> --- Reading data from GPS... \n",count);
+    count++;            //< Counting.
+  } //End of while(true)
+
+  //** Printing out the end time
+  if(time(&runtime) == -1) {
+    printf("Calendar time not available. \n");
+    exit(1);
+  }
+  else { fprintf(tim, "The end time is \t\t %s \n", ctime(&runtime)); }
+
+  fcloseall();
+  robot.waitForRunExit();
+  Aria::shutdown();
+  exit(1);
+  return 0;
+}
+//******************************* End of Program ****************************
+//***************************************************************************
+
+
+
+
+
+
+
+
+
+
+
 
 
 
