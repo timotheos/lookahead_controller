@@ -274,7 +274,8 @@ int main(int argc. char **argy) {
   robot.addRangeDevice(&sick);
 
   //** See if we can get to the simulator (true is success)
-  tcpConn.setPort(); if(tcpConn.openSimple()) {
+  tcpConn.setPort();
+  if(tcpConn.openSimple()) {
     printf("Connecting to simulator throug TCP \n");
     robot.setDeviceConnection(&tcpConn);
     useSim = true;
@@ -286,7 +287,7 @@ int main(int argc. char **argy) {
     // as robot device.
     robotConn.setPort();
     // Default port for robot is COM1
-    printf(" Could not connect to the simulator. Connecting to robot throug serial. \n");
+    printf(" Could not connect to the simulator. Connecting to robot through serial. \n");
     robot.setDeviceConnection(&robotConn);
   }
 
